@@ -4,6 +4,9 @@ class Vector2 {
         this.x = x;
         this.y = y;
     }
+    static zero() {
+        return new Vector2(0, 0);
+    }
     add(that) {
         return new Vector2(this.x + that.x, this.y + that.y);
     }
@@ -36,12 +39,6 @@ class Vector2 {
     }
 }
 const EPS = 1e-3;
-const GRID_ROWS = 10;
-const GRID_COLS = 10;
-const GRId_SIZE = new Vector2(GRID_COLS, GRID_ROWS);
-let scene = Array(GRID_ROWS)
-    .fill(0)
-    .map(() => Array(GRID_COLS).fill(0));
 function drawLine(ctx, p1, p2) {
     ctx.beginPath();
     ctx.moveTo(...p1.array());
@@ -56,28 +53,37 @@ function drawCircle(ctx, center, radius) {
 function canvasSize(ctx) {
     return new Vector2(ctx.canvas.width, ctx.canvas.height);
 }
-function drawGrid(ctx, p2) {
+function sceneSize(scene) {
+    const y = scene.length;
+    let x = Number.MIN_VALUE;
+    for (let row of scene) {
+        x = Math.max(x, row.length);
+    }
+    return new Vector2(x, y);
+}
+function minimap(ctx, p1, p2, position, size, scene) {
     ctx.reset();
-    ctx.scale(ctx.canvas.width / GRID_COLS, ctx.canvas.height / GRID_ROWS);
-    ctx.lineWidth = 0.02;
     ctx.fillStyle = "#181818";
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    ctx.strokeStyle = "#303030";
-    for (let y = 0; y < GRID_ROWS; ++y) {
-        for (let x = 0; x < GRID_COLS; ++x) {
+    const gridSize = sceneSize(scene);
+    ctx.translate(...position.array());
+    ctx.scale(...size.div(gridSize).array());
+    ctx.lineWidth = 0.06;
+    for (let y = 0; y < gridSize.y; ++y) {
+        for (let x = 0; x < gridSize.x; ++x) {
             if (scene[y][x] !== 0) {
                 ctx.fillStyle = "#303030";
                 ctx.fillRect(x, y, 1, 1);
             }
         }
     }
-    for (let x = 0; x <= GRID_ROWS; ++x) {
-        drawLine(ctx, new Vector2(x, 0), new Vector2(x, GRID_ROWS));
+    ctx.strokeStyle = "#303030";
+    for (let x = 0; x <= gridSize.x; ++x) {
+        drawLine(ctx, new Vector2(x, 0), new Vector2(x, gridSize.y));
     }
-    for (let y = 0; y <= GRID_COLS; ++y) {
-        drawLine(ctx, new Vector2(0, y), new Vector2(GRID_COLS, y));
+    for (let y = 0; y <= gridSize.y; ++y) {
+        drawLine(ctx, new Vector2(0, y), new Vector2(gridSize.x, y));
     }
-    let p1 = new Vector2(GRID_COLS * 0.16, GRID_ROWS * 0.89);
     ctx.fillStyle = "lime";
     drawCircle(ctx, p1, 0.2);
     if (p2 !== undefined) {
@@ -87,9 +93,9 @@ function drawGrid(ctx, p2) {
             drawLine(ctx, p1, p2);
             const c = hittingCell(p1, p2);
             if (c.x < 0 ||
-                c.x >= GRId_SIZE.x ||
+                c.x >= gridSize.x ||
                 c.y < 0 ||
-                c.y >= GRId_SIZE.y ||
+                c.y >= gridSize.y ||
                 scene[c.y][c.x] == 1) {
                 break;
             }
@@ -152,22 +158,38 @@ function hittingCell(p1, p2) {
     return new Vector2(Math.floor(p2.x + Math.sign(d.x) * EPS), Math.floor(p2.y + Math.sign(d.y) * EPS));
 }
 (() => {
-    scene[1][1] = 1;
+    let scene = [
+        [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ];
     const game = document.getElementById("game");
     if (game === null) {
         throw new Error("Can't find game canvas!");
     }
+    const factor = 70;
+    game.width = 16 * factor;
+    game.height = 12 * factor;
     const ctx = game.getContext("2d");
     if (ctx === null) {
         throw new Error("Not supported!");
     }
+    let p1 = sceneSize(scene).mul(new Vector2(0.98, 0.89));
     let p2;
+    let minimapPosition = Vector2.zero().add(canvasSize(ctx).scale(0.03));
+    let cellSize = ctx.canvas.width * 0.03;
+    let minimapSize = sceneSize(scene).scale(cellSize);
     game.addEventListener("mousemove", (event) => {
         p2 = new Vector2(event.offsetX, event.offsetY)
-            .div(canvasSize(ctx))
-            .mul(new Vector2(GRID_COLS, GRID_ROWS));
-        drawGrid(ctx, p2);
+            .sub(minimapPosition)
+            .div(minimapSize)
+            .mul(sceneSize(scene));
+        minimap(ctx, p1, p2, minimapPosition, minimapSize, scene);
     });
-    drawGrid(ctx, p2);
-    console.log(ctx);
+    minimap(ctx, p1, p2, minimapPosition, minimapSize, scene);
 })();
