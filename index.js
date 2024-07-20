@@ -2,6 +2,7 @@
 const EPS = 1e-3;
 const NEAR_CLIPPING_PLANE = 0.75;
 const FOV = Math.PI * 0.5;
+const SCREEN_WIDTH = 100;
 class Vector2 {
     constructor(x, y) {
         this.x = x;
@@ -43,6 +44,9 @@ class Vector2 {
     distanceTo(that) {
         return that.sub(this).length();
     }
+    lerp(that, t) {
+        return that.sub(this).scale(t).add(this);
+    }
     array() {
         return [this.x, this.y];
     }
@@ -55,8 +59,8 @@ class Player {
     fovRange() {
         const l = Math.tan(FOV * 0.5) * NEAR_CLIPPING_PLANE;
         const p = this.position.add(Vector2.fromAngle(this.direction).scale(NEAR_CLIPPING_PLANE));
-        const p1 = p.add(p.sub(this.position).rot90().norm().scale(l));
-        const p2 = p.sub(p.sub(this.position).rot90().norm().scale(l));
+        const p1 = p.sub(p.sub(this.position).rot90().norm().scale(l));
+        const p2 = p.add(p.sub(this.position).rot90().norm().scale(l));
         return [p1, p2];
     }
 }
@@ -134,16 +138,13 @@ function rayStep(p1, p2) {
     }
     return p3;
 }
-function castRay(scene, p1, p2) {
-    throw new Error("castRay TODO");
-}
 function minimap(ctx, player, position, size, scene) {
     ctx.save();
-    ctx.fillStyle = "#181818";
-    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     const gridSize = sceneSize(scene);
     ctx.translate(...position.array());
     ctx.scale(...size.div(gridSize).array());
+    ctx.fillStyle = "#181818";
+    ctx.fillRect(0, 0, ...gridSize.array());
     ctx.lineWidth = 0.06;
     for (let y = 0; y < gridSize.y; ++y) {
         for (let x = 0; x < gridSize.x; ++x) {
@@ -169,6 +170,33 @@ function minimap(ctx, player, position, size, scene) {
     drawLine(ctx, player.position, p2);
     ctx.restore();
 }
+function insideScene(scene, p) {
+    const size = sceneSize(scene);
+    return 0 <= p.x && p.x < size.x && 0 <= p.y && p.y < size.y;
+}
+function castRay(scene, p1, p2) {
+    for (;;) {
+        const c = hittingCell(p1, p2);
+        if (!insideScene(scene, c) || scene[c.y][c.x] !== 0)
+            break;
+        const p3 = rayStep(p1, p2);
+        p1 = p2;
+        p2 = p3;
+    }
+    return p2;
+}
+function render(ctx, player, scene) {
+    const [r1, r2] = player.fovRange();
+    const stripWidth = ctx.canvas.width / SCREEN_WIDTH;
+    for (let x = 0; x < SCREEN_WIDTH; ++x) {
+        const p = castRay(scene, player.position, r1.lerp(r2, x / SCREEN_WIDTH));
+        const c = hittingCell(player.position, p);
+        if (insideScene(scene, c) && scene[c.y][c.x] !== 0) {
+            ctx.fillStyle = "red";
+            ctx.fillRect(x * stripWidth, 0, stripWidth, ctx.canvas.height);
+        }
+    }
+}
 (() => {
     let scene = [
         [0, 0, 0, 1, 0, 0, 0, 0, 0],
@@ -184,16 +212,19 @@ function minimap(ctx, player, position, size, scene) {
     if (game === null) {
         throw new Error("Can't find game canvas!");
     }
-    const factor = 70;
+    const factor = 80;
     game.width = 16 * factor;
-    game.height = 12 * factor;
+    game.height = 9 * factor;
     const ctx = game.getContext("2d");
     if (ctx === null) {
         throw new Error("Not supported!");
     }
-    let player = new Player(sceneSize(scene).mul(new Vector2(0.65, 0.65)), Math.PI * 1.25);
+    let player = new Player(sceneSize(scene).mul(new Vector2(0.65, 0.65)), Math.PI);
     let minimapPosition = Vector2.zero().add(canvasSize(ctx).scale(0.03));
-    let cellSize = ctx.canvas.width * 0.07;
+    let cellSize = ctx.canvas.width * 0.025;
     let minimapSize = sceneSize(scene).scale(cellSize);
+    ctx.fillStyle = "#181818";
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    render(ctx, player, scene);
     minimap(ctx, player, minimapPosition, minimapSize, scene);
 })();
