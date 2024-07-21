@@ -1,3 +1,10 @@
+const EPS = 1e-6;
+const NEAR_CLIPPING_PLANE = 0.75;
+const FAR_CLIPPING_PLANE = 20.0;
+const FOV = Math.PI * 0.5;
+const SCREEN_WIDTH = 300;
+const PLAYER_STEP_LEN = 0.5;
+
 class Vector2 {
   x: number;
   y: number;
@@ -5,25 +12,27 @@ class Vector2 {
     this.x = x;
     this.y = y;
   }
+  static zero(): Vector2 {
+    return new Vector2(0, 0);
+  }
+  static fromAngle(angle: number) {
+    return new Vector2(Math.cos(angle), Math.sin(angle));
+  }
   add(that: Vector2): Vector2 {
     return new Vector2(this.x + that.x, this.y + that.y);
   }
   sub(that: Vector2): Vector2 {
     return new Vector2(this.x - that.x, this.y - that.y);
   }
-
   div(that: Vector2): Vector2 {
     return new Vector2(this.x / that.x, this.y / that.y);
   }
-
   mul(that: Vector2): Vector2 {
     return new Vector2(this.x * that.x, this.y * that.y);
   }
-
   length(): number {
     return Math.sqrt(this.x * this.x + this.y * this.y);
   }
-
   norm(): Vector2 {
     const l = this.length();
     if (l == 0) return new Vector2(0, 0);
@@ -32,21 +41,44 @@ class Vector2 {
   scale(value: number): Vector2 {
     return new Vector2(this.x * value, this.y * value);
   }
+  rot90(): Vector2 {
+    return new Vector2(-this.y, this.x);
+  }
   distanceTo(that: Vector2): number {
     return that.sub(this).length();
+  }
+  lerp(that: Vector2, t: number): Vector2 {
+    return that.sub(this).scale(t).add(this);
+  }
+  dot(that: Vector2): number {
+    return this.x * that.x + this.y * that.y;
   }
   array(): [number, number] {
     return [this.x, this.y];
   }
 }
 
-const EPS = 1e-3;
-const GRID_ROWS = 10;
-const GRID_COLS = 10;
-const GRId_SIZE = new Vector2(GRID_COLS, GRID_ROWS);
-let scene = Array(GRID_ROWS)
-  .fill(0)
-  .map(() => Array(GRID_COLS).fill(0));
+class Player {
+  position: Vector2;
+  direction: number;
+
+  constructor(position: Vector2, direction: number) {
+    this.position = position;
+    this.direction = direction;
+  }
+
+  fovRange(): [Vector2, Vector2] {
+    const l = Math.tan(FOV * 0.5) * NEAR_CLIPPING_PLANE;
+    const p = this.position.add(
+      Vector2.fromAngle(this.direction).scale(NEAR_CLIPPING_PLANE)
+    );
+
+    const p1 = p.sub(p.sub(this.position).rot90().norm().scale(l));
+    const p2 = p.add(p.sub(this.position).rot90().norm().scale(l));
+
+    return [p1, p2];
+  }
+}
 
 function drawLine(ctx: CanvasRenderingContext2D, p1: Vector2, p2: Vector2) {
   ctx.beginPath();
@@ -69,56 +101,27 @@ function canvasSize(ctx: CanvasRenderingContext2D): Vector2 {
   return new Vector2(ctx.canvas.width, ctx.canvas.height);
 }
 
-function drawGrid(ctx: CanvasRenderingContext2D, p2: Vector2 | undefined) {
-  ctx.reset();
-  ctx.scale(ctx.canvas.width / GRID_COLS, ctx.canvas.height / GRID_ROWS);
-  ctx.lineWidth = 0.02;
-
-  ctx.fillStyle = "#181818";
-  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.strokeStyle = "#303030";
-
-  for (let y = 0; y < GRID_ROWS; ++y) {
-    for (let x = 0; x < GRID_COLS; ++x) {
-      if (scene[y][x] !== 0) {
-        ctx.fillStyle = "#303030";
-        ctx.fillRect(x, y, 1, 1);
-      }
-    }
+function sceneSize(scene: Scene): Vector2 {
+  const y = scene.length;
+  let x = Number.MIN_VALUE;
+  for (let row of scene) {
+    x = Math.max(x, row.length);
   }
+  return new Vector2(x, y);
+}
 
-  for (let x = 0; x <= GRID_ROWS; ++x) {
-    drawLine(ctx, new Vector2(x, 0), new Vector2(x, GRID_ROWS));
-  }
-  for (let y = 0; y <= GRID_COLS; ++y) {
-    drawLine(ctx, new Vector2(0, y), new Vector2(GRID_COLS, y));
-  }
+function snap(x: number, dx: number): number {
+  if (dx > 0) return Math.ceil(x + Math.sign(dx) * EPS);
+  if (dx < 0) return Math.floor(x + Math.sign(dx) * EPS);
+  return x;
+}
 
-  let p1 = new Vector2(GRID_COLS * 0.16, GRID_ROWS * 0.89);
-  ctx.fillStyle = "lime";
-  drawCircle(ctx, p1, 0.2);
-  if (p2 !== undefined) {
-    for (;;) {
-      ctx.strokeStyle = "lime";
-      drawCircle(ctx, p2, 0.2);
-      drawLine(ctx, p1, p2);
-
-      const c = hittingCell(p1, p2);
-      if (
-        c.x < 0 ||
-        c.x >= GRId_SIZE.x ||
-        c.y < 0 ||
-        c.y >= GRId_SIZE.y ||
-        scene[c.y][c.x] == 1
-      ) {
-        break;
-      }
-
-      const p3 = rayStep(p1, p2);
-      p1 = p2;
-      p2 = p3;
-    }
-  }
+function hittingCell(p1: Vector2, p2: Vector2): Vector2 {
+  const d = p2.sub(p1);
+  return new Vector2(
+    Math.floor(p2.x + Math.sign(d.x) * EPS),
+    Math.floor(p2.y + Math.sign(d.y) * EPS)
+  );
 }
 
 function rayStep(p1: Vector2, p2: Vector2): Vector2 {
@@ -165,42 +168,178 @@ function rayStep(p1: Vector2, p2: Vector2): Vector2 {
   return p3;
 }
 
-function snap(x: number, dx: number): number {
-  if (dx > 0) return Math.ceil(x + Math.sign(dx) * EPS);
-  if (dx < 0) return Math.floor(x + Math.sign(dx) * EPS);
-  return x;
+function renderMinimap(
+  ctx: CanvasRenderingContext2D,
+  player: Player,
+  position: Vector2,
+  size: Vector2,
+  scene: Scene
+) {
+  ctx.save();
+
+  const gridSize = sceneSize(scene);
+
+  ctx.translate(...position.array());
+  ctx.scale(...size.div(gridSize).array());
+
+  ctx.fillStyle = "#181818";
+  ctx.fillRect(0, 0, ...gridSize.array());
+
+  ctx.lineWidth = 0.06;
+  for (let y = 0; y < gridSize.y; ++y) {
+    for (let x = 0; x < gridSize.x; ++x) {
+      const color = scene[y][x];
+      if (color !== null) {
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+
+  ctx.strokeStyle = "#303030";
+
+  for (let x = 0; x <= gridSize.x; ++x) {
+    drawLine(ctx, new Vector2(x, 0), new Vector2(x, gridSize.y));
+  }
+  for (let y = 0; y <= gridSize.y; ++y) {
+    drawLine(ctx, new Vector2(0, y), new Vector2(gridSize.x, y));
+  }
+
+  ctx.fillStyle = "lime";
+  drawCircle(ctx, player.position, 0.2);
+
+  const [p1, p2] = player.fovRange();
+
+  ctx.strokeStyle = "lime";
+  drawLine(ctx, p1, p2);
+  drawLine(ctx, player.position, p1);
+  drawLine(ctx, player.position, p2);
+
+  ctx.restore();
 }
 
-function hittingCell(p1: Vector2, p2: Vector2): Vector2 {
-  const d = p2.sub(p1);
-  return new Vector2(
-    Math.floor(p2.x + Math.sign(d.x) * EPS),
-    Math.floor(p2.y + Math.sign(d.y) * EPS)
-  );
+type Scene = Array<Array<string | null>>;
+
+function insideScene(scene: Scene, p: Vector2): boolean {
+  const size = sceneSize(scene);
+  return 0 <= p.x && p.x < size.x && 0 <= p.y && p.y < size.y;
+}
+
+function castRay(scene: Scene, p1: Vector2, p2: Vector2): Vector2 {
+  for (;;) {
+    const c = hittingCell(p1, p2);
+    if (!insideScene(scene, c) || scene[c.y][c.x] !== null) break;
+    const p3 = rayStep(p1, p2);
+    p1 = p2;
+    p2 = p3;
+  }
+
+  return p2;
+}
+
+function renderScene(
+  ctx: CanvasRenderingContext2D,
+  player: Player,
+  scene: Scene
+) {
+  const [r1, r2] = player.fovRange();
+  const stripWidth = Math.ceil(ctx.canvas.width / SCREEN_WIDTH);
+
+  for (let x = 0; x < SCREEN_WIDTH; ++x) {
+    const p = castRay(scene, player.position, r1.lerp(r2, x / SCREEN_WIDTH));
+    const c = hittingCell(player.position, p);
+    if (insideScene(scene, c)) {
+      const color = scene[c.y][c.x];
+      if (color !== null) {
+        const v = p.sub(player.position);
+        const d = Vector2.fromAngle(player.direction);
+        const stripHeight = ctx.canvas.height / v.dot(d);
+        ctx.fillStyle = color;
+        ctx.fillRect(
+          x * stripWidth,
+          ctx.canvas.height * 0.5 - stripHeight * 0.5,
+          stripWidth,
+          stripHeight
+        );
+      }
+    }
+  }
+}
+
+function renderGame(
+  ctx: CanvasRenderingContext2D,
+  player: Player,
+  scene: Scene
+) {
+  const minimapPosition = Vector2.zero().add(canvasSize(ctx).scale(0.03));
+  const cellSize = ctx.canvas.width * 0.025;
+  const minimapSize = sceneSize(scene).scale(cellSize);
+
+  ctx.fillStyle = "#181818";
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  renderScene(ctx, player, scene);
+  renderMinimap(ctx, player, minimapPosition, minimapSize, scene);
 }
 
 (() => {
-  scene[1][1] = 1;
   const game = document.getElementById("game") as HTMLCanvasElement | null;
-  if (game === null) {
-    throw new Error("Can't find game canvas!");
-  }
+  if (game === null) throw new Error("Can't find game canvas!");
+  const factor = 80;
+  game.width = 16 * factor;
+  game.height = 9 * factor;
 
   const ctx = game.getContext("2d");
-  if (ctx === null) {
-    throw new Error("Not supported!");
-  }
+  if (ctx === null) throw new Error("Not supported!");
 
-  let p2: Vector2 | undefined;
+  let scene = [
+    [null, null, null, "red", null, null, null, null, null],
+    [null, null, null, "orange", null, null, null, null, null],
+    [null, "green", "red", "blue", null, null, null, null, null],
+    [null, null, null, null, null, null, null, null, null],
+    [null, "red", "purple", null, null, null, null, null, null],
+    [null, null, "blue", null, null, null, null, null, null],
+    [null, null, null, "red", "yellow", null, null, null, null],
+    [null, null, null, null, "green", null, null, null, null],
+  ];
+  let player = new Player(
+    sceneSize(scene).mul(new Vector2(0.65, 0.65)),
+    Math.PI * 1.25
+  );
 
-  game.addEventListener("mousemove", (event) => {
-    p2 = new Vector2(event.offsetX, event.offsetY)
-      .div(canvasSize(ctx))
-      .mul(new Vector2(GRID_COLS, GRID_ROWS));
-    drawGrid(ctx, p2);
+  window.addEventListener("keydown", (e) => {
+    if (!e.repeat) {
+      switch (e.code) {
+        case "KeyW":
+          {
+            player.position = player.position.add(
+              Vector2.fromAngle(player.direction).scale(PLAYER_STEP_LEN)
+            );
+            renderGame(ctx, player, scene);
+          }
+          break;
+        case "KeyS":
+          {
+            player.position = player.position.sub(
+              Vector2.fromAngle(player.direction).scale(PLAYER_STEP_LEN)
+            );
+            renderGame(ctx, player, scene);
+          }
+          break;
+        case "KeyD":
+          {
+            player.direction += Math.PI * 0.1;
+            renderGame(ctx, player, scene);
+          }
+          break;
+        case "KeyA":
+          {
+            player.direction -= Math.PI * 0.1;
+            renderGame(ctx, player, scene);
+          }
+          break;
+      }
+    }
   });
 
-  drawGrid(ctx, p2);
-
-  console.log(ctx);
+  renderGame(ctx, player, scene);
 })();
