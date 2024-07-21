@@ -1,8 +1,8 @@
-const EPS = 1e-3;
+const EPS = 1e-6;
 const NEAR_CLIPPING_PLANE = 0.75;
 const FAR_CLIPPING_PLANE = 20.0;
 const FOV = Math.PI * 0.5;
-const SCREEN_WIDTH = 200;
+const SCREEN_WIDTH = 300;
 const PLAYER_STEP_LEN = 0.5;
 
 class Vector2 {
@@ -49,6 +49,9 @@ class Vector2 {
   }
   lerp(that: Vector2, t: number): Vector2 {
     return that.sub(this).scale(t).add(this);
+  }
+  dot(that: Vector2): number {
+    return this.x * that.x + this.y * that.y;
   }
   array(): [number, number] {
     return [this.x, this.y];
@@ -185,8 +188,9 @@ function renderMinimap(
   ctx.lineWidth = 0.06;
   for (let y = 0; y < gridSize.y; ++y) {
     for (let x = 0; x < gridSize.x; ++x) {
-      if (scene[y][x] !== 0) {
-        ctx.fillStyle = "#303030";
+      const color = scene[y][x];
+      if (color !== null) {
+        ctx.fillStyle = color;
         ctx.fillRect(x, y, 1, 1);
       }
     }
@@ -214,7 +218,7 @@ function renderMinimap(
   ctx.restore();
 }
 
-type Scene = Array<Array<number>>;
+type Scene = Array<Array<string | null>>;
 
 function insideScene(scene: Scene, p: Vector2): boolean {
   const size = sceneSize(scene);
@@ -224,7 +228,7 @@ function insideScene(scene: Scene, p: Vector2): boolean {
 function castRay(scene: Scene, p1: Vector2, p2: Vector2): Vector2 {
   for (;;) {
     const c = hittingCell(p1, p2);
-    if (!insideScene(scene, c) || scene[c.y][c.x] !== 0) break;
+    if (!insideScene(scene, c) || scene[c.y][c.x] !== null) break;
     const p3 = rayStep(p1, p2);
     p1 = p2;
     p2 = p3;
@@ -244,16 +248,20 @@ function renderScene(
   for (let x = 0; x < SCREEN_WIDTH; ++x) {
     const p = castRay(scene, player.position, r1.lerp(r2, x / SCREEN_WIDTH));
     const c = hittingCell(player.position, p);
-    if (insideScene(scene, c) && scene[c.y][c.x] !== 0) {
-      const t = 1 - p.sub(player.position).length() / FAR_CLIPPING_PLANE;
-      const stripHeight = t * ctx.canvas.height;
-      ctx.fillStyle = `rgba(${255 * t}, 0, 0, 1)`;
-      ctx.fillRect(
-        x * stripWidth,
-        ctx.canvas.height * 0.5 - stripHeight * 0.5,
-        stripWidth,
-        stripHeight
-      );
+    if (insideScene(scene, c)) {
+      const color = scene[c.y][c.x];
+      if (color !== null) {
+        const v = p.sub(player.position);
+        const d = Vector2.fromAngle(player.direction);
+        const stripHeight = ctx.canvas.height / v.dot(d);
+        ctx.fillStyle = color;
+        ctx.fillRect(
+          x * stripWidth,
+          ctx.canvas.height * 0.5 - stripHeight * 0.5,
+          stripWidth,
+          stripHeight
+        );
+      }
     }
   }
 }
@@ -284,14 +292,14 @@ function renderGame(
   if (ctx === null) throw new Error("Not supported!");
 
   let scene = [
-    [0, 0, 0, 1, 0, 0, 0, 0, 0],
-    [0, 0, 0, 1, 0, 0, 0, 0, 0],
-    [0, 1, 1, 1, 0, 0, 0, 0, 0],
-    [0, 0, 1, 1, 0, 0, 0, 0, 0],
-    [0, 1, 1, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [null, null, null, "red", null, null, null, null, null],
+    [null, null, null, "orange", null, null, null, null, null],
+    [null, "green", "red", "blue", null, null, null, null, null],
+    [null, null, null, null, null, null, null, null, null],
+    [null, "red", "purple", null, null, null, null, null, null],
+    [null, null, "blue", null, null, null, null, null, null],
+    [null, null, null, "red", "yellow", null, null, null, null],
+    [null, null, null, null, "green", null, null, null, null],
   ];
   let player = new Player(
     sceneSize(scene).mul(new Vector2(0.65, 0.65)),
