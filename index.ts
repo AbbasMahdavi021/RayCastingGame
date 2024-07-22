@@ -399,40 +399,77 @@ async function loadImageData(url: string): Promise<HTMLImageElement> {
     Math.PI * 1.25
   );
 
+  let movingForward = false;
+  let movingBackward = false;
+  let turningLeft = false;
+  let turningRight = false;
+
   window.addEventListener("keydown", (e) => {
     if (!e.repeat) {
       switch (e.code) {
         case "KeyW":
-          {
-            player.position = player.position.add(
-              Vector2.fromAngle(player.direction).scale(PLAYER_STEP_LEN)
-            );
-            renderGame(ctx, player, scene);
-          }
+          movingForward = true;
           break;
         case "KeyS":
-          {
-            player.position = player.position.sub(
-              Vector2.fromAngle(player.direction).scale(PLAYER_STEP_LEN)
-            );
-            renderGame(ctx, player, scene);
-          }
-          break;
-        case "KeyD":
-          {
-            player.direction += Math.PI * 0.1;
-            renderGame(ctx, player, scene);
-          }
+          movingBackward = true;
           break;
         case "KeyA":
-          {
-            player.direction -= Math.PI * 0.1;
-            renderGame(ctx, player, scene);
-          }
+          turningLeft = true;
+          break;
+        case "KeyD":
+          turningRight = true;
+          break;
+      }
+    }
+  });
+  window.addEventListener("keyup", (e) => {
+    if (!e.repeat) {
+      switch (e.code) {
+        case "KeyW":
+          movingForward = false;
+          break;
+        case "KeyS":
+          movingBackward = false;
+          break;
+        case "KeyA":
+          turningLeft = false;
+          break;
+        case "KeyD":
+          turningRight = false;
           break;
       }
     }
   });
 
-  renderGame(ctx, player, scene);
+  let prevTimestamp = 0;
+  const frame = (timestamp: number) => {
+    const deltaTime = (timestamp - prevTimestamp) / 1000;
+    prevTimestamp = timestamp;
+    let velocity = Vector2.zero();
+    let angularVelocity = 0.0;
+    if (movingForward) {
+      velocity = velocity.add(
+        Vector2.fromAngle(player.direction).scale(PLAYER_SPEED)
+      );
+    }
+    if (movingBackward) {
+      velocity = velocity.sub(
+        Vector2.fromAngle(player.direction).scale(PLAYER_SPEED)
+      );
+    }
+    if (turningLeft) {
+      angularVelocity -= Math.PI;
+    }
+    if (turningRight) {
+      angularVelocity += Math.PI;
+    }
+    player.direction = player.direction + angularVelocity * deltaTime;
+    player.position = player.position.add(velocity.scale(deltaTime));
+    renderGame(ctx, player, scene);
+    window.requestAnimationFrame(frame);
+  };
+  window.requestAnimationFrame((timestamp) => {
+    prevTimestamp = timestamp;
+    window.requestAnimationFrame(frame);
+  });
 })();
