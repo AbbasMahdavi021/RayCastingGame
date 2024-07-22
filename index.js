@@ -1,7 +1,16 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 const EPS = 1e-6;
-const NEAR_CLIPPING_PLANE = 1.0;
-const FAR_CLIPPING_PLANE = 20.0;
+const NEAR_CLIPPING_PLANE = 0.25;
+const FAR_CLIPPING_PLANE = 10.0;
 const FOV = Math.PI * 0.5;
 const SCREEN_WIDTH = 300;
 const PLAYER_STEP_LEN = 0.5;
@@ -48,9 +57,7 @@ class Vector2 {
         return new Vector2(-this.y, this.x);
     }
     sqrDistanceTo(that) {
-        const dx = that.x - this.x;
-        const dy = that.y - this.y;
-        return dx * dx + dy * dy;
+        return that.sub(this).sqrLength();
     }
     lerp(that, t) {
         return that.sub(this).scale(t).add(this);
@@ -60,6 +67,42 @@ class Vector2 {
     }
     array() {
         return [this.x, this.y];
+    }
+}
+class Color {
+    constructor(r, g, b, a) {
+        this.r = r;
+        this.g = g;
+        this.b = b;
+        this.a = a;
+    }
+    static red() {
+        return new Color(1, 0, 0, 1);
+    }
+    static green() {
+        return new Color(0, 1, 0, 1);
+    }
+    static blue() {
+        return new Color(0, 0, 1, 1);
+    }
+    static yellow() {
+        return new Color(1, 1, 0, 1);
+    }
+    static purple() {
+        return new Color(1, 0, 1, 1);
+    }
+    static cyan() {
+        return new Color(0, 1, 1, 1);
+    }
+    brightness(factor) {
+        return new Color(factor * this.r, factor * this.g, factor * this.b, this.a);
+    }
+    toStyle() {
+        return (`rgba(` +
+            `${Math.floor(this.r * 255)}, ` +
+            `${Math.floor(this.g * 255)}, ` +
+            `${Math.floor(this.b * 255)}, ` +
+            `${this.a})`);
     }
 }
 class Player {
@@ -159,10 +202,13 @@ function renderMinimap(ctx, player, position, size, scene) {
     ctx.lineWidth = 0.06;
     for (let y = 0; y < gridSize.y; ++y) {
         for (let x = 0; x < gridSize.x; ++x) {
-            const color = scene[y][x];
-            if (color !== null) {
-                ctx.fillStyle = color;
+            const cell = scene[y][x];
+            if (cell instanceof Color) {
+                ctx.fillStyle = cell.toStyle();
                 ctx.fillRect(x, y, 1, 1);
+            }
+            else if (cell instanceof HTMLImageElement) {
+                ctx.drawImage(cell, x, y, 1, 1);
             }
         }
     }
@@ -205,13 +251,29 @@ function renderScene(ctx, player, scene) {
         const p = castRay(scene, player.position, r1.lerp(r2, x / SCREEN_WIDTH));
         const c = hittingCell(player.position, p);
         if (insideScene(scene, c)) {
-            const color = scene[c.y][c.x];
-            if (color !== null) {
+            const cell = scene[c.y][c.x];
+            if (cell instanceof Color) {
                 const v = p.sub(player.position);
                 const d = Vector2.fromAngle(player.direction);
                 const stripHeight = ctx.canvas.height / v.dot(d);
-                ctx.fillStyle = color;
-                ctx.fillRect(x * stripWidth, ctx.canvas.height * 0.5 - stripHeight * 0.5, stripWidth, stripHeight);
+                ctx.fillStyle = cell.brightness(1 / v.dot(d)).toStyle();
+                ctx.fillRect(x * stripWidth, (ctx.canvas.height - stripHeight) * 0.5, stripWidth, stripHeight);
+            }
+            else if (cell instanceof HTMLImageElement) {
+                const v = p.sub(player.position);
+                const d = Vector2.fromAngle(player.direction);
+                const stripHeight = ctx.canvas.height / v.dot(d);
+                let u = 0;
+                const t = p.sub(c);
+                if ((Math.abs(t.x) < EPS || Math.abs(t.x - 1) < EPS) && t.y > 0) {
+                    u = t.y;
+                }
+                else {
+                    u = t.x;
+                }
+                ctx.drawImage(cell, Math.floor(u * cell.width), 0, 1, cell.height, x * stripWidth, (ctx.canvas.height - stripHeight) * 0.5, stripWidth, stripHeight);
+                ctx.fillStyle = new Color(0, 0, 0, 1 - 1 / v.dot(d)).toStyle();
+                ctx.fillRect(x * stripWidth, (ctx.canvas.height - stripHeight * 1.01) * 0.5, stripWidth, stripHeight * 1.01);
             }
         }
     }
@@ -225,7 +287,17 @@ function renderGame(ctx, player, scene) {
     renderScene(ctx, player, scene);
     renderMinimap(ctx, player, minimapPosition, minimapSize, scene);
 }
-(() => {
+function loadImageData(url) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const image = new Image();
+        image.src = url;
+        return new Promise((resolve, reject) => {
+            image.onload = () => resolve(image);
+            image.onerror = reject;
+        });
+    });
+}
+(() => __awaiter(void 0, void 0, void 0, function* () {
     const game = document.getElementById("game");
     if (game === null)
         throw new Error("Can't find game canvas!");
@@ -235,15 +307,16 @@ function renderGame(ctx, player, scene) {
     const ctx = game.getContext("2d");
     if (ctx === null)
         throw new Error("Not supported!");
+    const face = yield loadImageData("assets/images/sad.png").catch(() => Color.purple());
     let scene = [
-        [null, null, null, "red", null, null, null, null, null],
-        [null, null, null, "orange", null, null, null, null, null],
-        [null, "green", "red", "blue", null, null, null, null, null],
+        [null, null, null, face, null, null, null, null, null],
+        [null, null, null, face, null, null, null, null, null],
+        [null, face, face, face, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null],
-        [null, "red", "purple", null, null, null, null, null, null],
-        [null, null, "blue", null, null, null, null, null, null],
-        [null, null, null, "red", "yellow", null, null, null, null],
-        [null, null, null, null, "green", null, null, null, null],
+        [null, null, null, null, null, null, null, null, null],
+        [null, null, null, null, null, null, null, null, null],
+        [null, null, null, null, null, null, null, null, null],
+        [null, null, null, null, null, null, null, null, null],
     ];
     let player = new Player(sceneSize(scene).mul(new Vector2(0.65, 0.65)), Math.PI * 1.25);
     window.addEventListener("keydown", (e) => {
@@ -277,4 +350,4 @@ function renderGame(ctx, player, scene) {
         }
     });
     renderGame(ctx, player, scene);
-})();
+}))();

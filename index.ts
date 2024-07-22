@@ -1,6 +1,6 @@
 const EPS = 1e-6;
-const NEAR_CLIPPING_PLANE = 1.0;
-const FAR_CLIPPING_PLANE = 20.0;
+const NEAR_CLIPPING_PLANE = 0.25;
+const FAR_CLIPPING_PLANE = 10.0;
 const FOV = Math.PI * 0.5;
 const SCREEN_WIDTH = 300;
 const PLAYER_STEP_LEN = 0.5;
@@ -16,7 +16,7 @@ class Vector2 {
   static zero(): Vector2 {
     return new Vector2(0, 0);
   }
-  static fromAngle(angle: number) {
+  static fromAngle(angle: number): Vector2 {
     return new Vector2(Math.cos(angle), Math.sin(angle));
   }
   add(that: Vector2): Vector2 {
@@ -49,9 +49,7 @@ class Vector2 {
     return new Vector2(-this.y, this.x);
   }
   sqrDistanceTo(that: Vector2): number {
-    const dx = that.x - this.x;
-    const dy = that.y - this.y;
-    return dx * dx + dy * dy;
+    return that.sub(this).sqrLength();
   }
   lerp(that: Vector2, t: number): Vector2 {
     return that.sub(this).scale(t).add(this);
@@ -237,10 +235,12 @@ function renderMinimap(
   ctx.lineWidth = 0.06;
   for (let y = 0; y < gridSize.y; ++y) {
     for (let x = 0; x < gridSize.x; ++x) {
-      const color = scene[y][x];
-      if (color !== null) {
-        ctx.fillStyle = color;
+      const cell = scene[y][x];
+      if (cell instanceof Color) {
+        ctx.fillStyle = cell.toStyle();
         ctx.fillRect(x, y, 1, 1);
+      } else if (cell instanceof HTMLImageElement) {
+        ctx.drawImage(cell, x, y, 1, 1);
       }
     }
   }
@@ -267,7 +267,7 @@ function renderMinimap(
   ctx.restore();
 }
 
-type Scene = Array<Array<string | null>>;
+type Scene = Array<Array<Color | HTMLImageElement | null>>;
 
 function insideScene(scene: Scene, p: Vector2): boolean {
   const size = sceneSize(scene);
@@ -298,17 +298,48 @@ function renderScene(
     const p = castRay(scene, player.position, r1.lerp(r2, x / SCREEN_WIDTH));
     const c = hittingCell(player.position, p);
     if (insideScene(scene, c)) {
-      const color = scene[c.y][c.x];
-      if (color !== null) {
+      const cell = scene[c.y][c.x];
+      if (cell instanceof Color) {
         const v = p.sub(player.position);
         const d = Vector2.fromAngle(player.direction);
         const stripHeight = ctx.canvas.height / v.dot(d);
-        ctx.fillStyle = color;
+        ctx.fillStyle = cell.brightness(1 / v.dot(d)).toStyle();
         ctx.fillRect(
           x * stripWidth,
-          ctx.canvas.height * 0.5 - stripHeight * 0.5,
+          (ctx.canvas.height - stripHeight) * 0.5,
           stripWidth,
           stripHeight
+        );
+      } else if (cell instanceof HTMLImageElement) {
+        const v = p.sub(player.position);
+        const d = Vector2.fromAngle(player.direction);
+        const stripHeight = ctx.canvas.height / v.dot(d);
+
+        let u = 0;
+        const t = p.sub(c);
+        if ((Math.abs(t.x) < EPS || Math.abs(t.x - 1) < EPS) && t.y > 0) {
+          u = t.y;
+        } else {
+          u = t.x;
+        }
+
+        ctx.drawImage(
+          cell,
+          Math.floor(u * cell.width),
+          0,
+          1,
+          cell.height,
+          x * stripWidth,
+          (ctx.canvas.height - stripHeight) * 0.5,
+          stripWidth,
+          stripHeight
+        );
+        ctx.fillStyle = new Color(0, 0, 0, 1 - 1 / v.dot(d)).toStyle();
+        ctx.fillRect(
+          x * stripWidth,
+          (ctx.canvas.height - stripHeight * 1.01) * 0.5,
+          stripWidth,
+          stripHeight * 1.01
         );
       }
     }
@@ -330,7 +361,16 @@ function renderGame(
   renderMinimap(ctx, player, minimapPosition, minimapSize, scene);
 }
 
-(() => {
+async function loadImageData(url: string): Promise<HTMLImageElement> {
+  const image = new Image();
+  image.src = url;
+  return new Promise((resolve, reject) => {
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+  });
+}
+
+(async () => {
   const game = document.getElementById("game") as HTMLCanvasElement | null;
   if (game === null) throw new Error("Can't find game canvas!");
   const factor = 80;
@@ -340,15 +380,19 @@ function renderGame(
   const ctx = game.getContext("2d");
   if (ctx === null) throw new Error("Not supported!");
 
+  const face = await loadImageData("assets/images/sad.png").catch(() =>
+    Color.purple()
+  );
+
   let scene = [
-    [null, null, null, "red", null, null, null, null, null],
-    [null, null, null, "orange", null, null, null, null, null],
-    [null, "green", "red", "blue", null, null, null, null, null],
+    [null, null, null, face, null, null, null, null, null],
+    [null, null, null, face, null, null, null, null, null],
+    [null, face, face, face, null, null, null, null, null],
     [null, null, null, null, null, null, null, null, null],
-    [null, "red", "purple", null, null, null, null, null, null],
-    [null, null, "blue", null, null, null, null, null, null],
-    [null, null, null, "red", "yellow", null, null, null, null],
-    [null, null, null, null, "green", null, null, null, null],
+    [null, null, null, null, null, null, null, null, null],
+    [null, null, null, null, null, null, null, null, null],
+    [null, null, null, null, null, null, null, null, null],
+    [null, null, null, null, null, null, null, null, null],
   ];
   let player = new Player(
     sceneSize(scene).mul(new Vector2(0.65, 0.65)),
