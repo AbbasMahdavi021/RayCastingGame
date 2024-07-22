@@ -1,10 +1,11 @@
 "use strict";
 const EPS = 1e-6;
-const NEAR_CLIPPING_PLANE = 0.75;
+const NEAR_CLIPPING_PLANE = 1.0;
 const FAR_CLIPPING_PLANE = 20.0;
 const FOV = Math.PI * 0.5;
 const SCREEN_WIDTH = 300;
 const PLAYER_STEP_LEN = 0.5;
+const PLAYER_SPEED = 2;
 class Vector2 {
     constructor(x, y) {
         this.x = x;
@@ -36,7 +37,7 @@ class Vector2 {
     }
     norm() {
         const l = this.length();
-        if (l == 0)
+        if (l === 0)
             return new Vector2(0, 0);
         return new Vector2(this.x / l, this.y / l);
     }

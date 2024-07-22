@@ -1,9 +1,10 @@
 const EPS = 1e-6;
-const NEAR_CLIPPING_PLANE = 0.75;
+const NEAR_CLIPPING_PLANE = 1.0;
 const FAR_CLIPPING_PLANE = 20.0;
 const FOV = Math.PI * 0.5;
 const SCREEN_WIDTH = 300;
 const PLAYER_STEP_LEN = 0.5;
+const PLAYER_SPEED = 2;
 
 class Vector2 {
   x: number;
