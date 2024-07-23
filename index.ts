@@ -380,7 +380,7 @@ async function loadImageData(url: string): Promise<HTMLImageElement> {
   const ctx = game.getContext("2d");
   if (ctx === null) throw new Error("Not supported!");
 
-  const face = await loadImageData("assets/images/sad.png").catch(() =>
+  const face = await loadImageData("assets/textures/wall.png").catch(() =>
     Color.purple()
   );
 

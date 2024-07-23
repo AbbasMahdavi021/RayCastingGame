@@ -307,7 +307,7 @@ function loadImageData(url) {
     const ctx = game.getContext("2d");
     if (ctx === null)
         throw new Error("Not supported!");
-    const face = yield loadImageData("assets/images/sad.png").catch(() => Color.purple());
+    const face = yield loadImageData("assets/textures/wall.png").catch(() => Color.purple());
     let scene = [
         [null, null, null, face, null, null, null, null, null],
         [null, null, null, face, null, null, null, null, null],
