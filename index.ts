@@ -1,9 +1,10 @@
 const EPS = 1e-6;
-const NEAR_CLIPPING_PLANE = 0.75;
-const FAR_CLIPPING_PLANE = 20.0;
+const NEAR_CLIPPING_PLANE = 0.25;
+const FAR_CLIPPING_PLANE = 10.0;
 const FOV = Math.PI * 0.5;
 const SCREEN_WIDTH = 300;
 const PLAYER_STEP_LEN = 0.5;
+const PLAYER_SPEED = 2;
 
 class Vector2 {
   x: number;
@@ -15,7 +16,7 @@ class Vector2 {
   static zero(): Vector2 {
     return new Vector2(0, 0);
   }
-  static fromAngle(angle: number) {
+  static fromAngle(angle: number): Vector2 {
     return new Vector2(Math.cos(angle), Math.sin(angle));
   }
   add(that: Vector2): Vector2 {
@@ -33,9 +34,12 @@ class Vector2 {
   length(): number {
     return Math.sqrt(this.x * this.x + this.y * this.y);
   }
+  sqrLength(): number {
+    return this.x * this.x + this.y * this.y;
+  }
   norm(): Vector2 {
     const l = this.length();
-    if (l == 0) return new Vector2(0, 0);
+    if (l === 0) return new Vector2(0, 0);
     return new Vector2(this.x / l, this.y / l);
   }
   scale(value: number): Vector2 {
@@ -44,8 +48,8 @@ class Vector2 {
   rot90(): Vector2 {
     return new Vector2(-this.y, this.x);
   }
-  distanceTo(that: Vector2): number {
-    return that.sub(this).length();
+  sqrDistanceTo(that: Vector2): number {
+    return that.sub(this).sqrLength();
   }
   lerp(that: Vector2, t: number): Vector2 {
     return that.sub(this).scale(t).add(this);
@@ -55,6 +59,49 @@ class Vector2 {
   }
   array(): [number, number] {
     return [this.x, this.y];
+  }
+}
+
+class Color {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+  constructor(r: number, g: number, b: number, a: number) {
+    this.r = r;
+    this.g = g;
+    this.b = b;
+    this.a = a;
+  }
+  static red(): Color {
+    return new Color(1, 0, 0, 1);
+  }
+  static green(): Color {
+    return new Color(0, 1, 0, 1);
+  }
+  static blue(): Color {
+    return new Color(0, 0, 1, 1);
+  }
+  static yellow(): Color {
+    return new Color(1, 1, 0, 1);
+  }
+  static purple(): Color {
+    return new Color(1, 0, 1, 1);
+  }
+  static cyan(): Color {
+    return new Color(0, 1, 1, 1);
+  }
+  brightness(factor: number): Color {
+    return new Color(factor * this.r, factor * this.g, factor * this.b, this.a);
+  }
+  toStyle(): string {
+    return (
+      `rgba(` +
+      `${Math.floor(this.r * 255)}, ` +
+      `${Math.floor(this.g * 255)}, ` +
+      `${Math.floor(this.b * 255)}, ` +
+      `${this.a})`
+    );
   }
 }
 
@@ -155,7 +202,7 @@ function rayStep(p1: Vector2, p2: Vector2): Vector2 {
       const y3 = snap(p2.y, d.y);
       const x3 = (y3 - c) / m;
       const p3t = new Vector2(x3, y3);
-      if (p2.distanceTo(p3t) < p2.distanceTo(p3)) {
+      if (p2.sqrDistanceTo(p3t) < p2.sqrDistanceTo(p3)) {
         p3 = p3t;
       }
     }
@@ -188,10 +235,12 @@ function renderMinimap(
   ctx.lineWidth = 0.06;
   for (let y = 0; y < gridSize.y; ++y) {
     for (let x = 0; x < gridSize.x; ++x) {
-      const color = scene[y][x];
-      if (color !== null) {
-        ctx.fillStyle = color;
+      const cell = scene[y][x];
+      if (cell instanceof Color) {
+        ctx.fillStyle = cell.toStyle();
         ctx.fillRect(x, y, 1, 1);
+      } else if (cell instanceof HTMLImageElement) {
+        ctx.drawImage(cell, x, y, 1, 1);
       }
     }
   }
@@ -218,7 +267,7 @@ function renderMinimap(
   ctx.restore();
 }
 
-type Scene = Array<Array<string | null>>;
+type Scene = Array<Array<Color | HTMLImageElement | null>>;
 
 function insideScene(scene: Scene, p: Vector2): boolean {
   const size = sceneSize(scene);
@@ -226,14 +275,14 @@ function insideScene(scene: Scene, p: Vector2): boolean {
 }
 
 function castRay(scene: Scene, p1: Vector2, p2: Vector2): Vector2 {
-  for (;;) {
+  let start = p1;
+  while (start.sqrDistanceTo(p1) < FAR_CLIPPING_PLANE * FAR_CLIPPING_PLANE) {
     const c = hittingCell(p1, p2);
-    if (!insideScene(scene, c) || scene[c.y][c.x] !== null) break;
+    if (insideScene(scene, c) && scene[c.y][c.x] !== null) break;
     const p3 = rayStep(p1, p2);
     p1 = p2;
     p2 = p3;
   }
-
   return p2;
 }
 
@@ -249,17 +298,48 @@ function renderScene(
     const p = castRay(scene, player.position, r1.lerp(r2, x / SCREEN_WIDTH));
     const c = hittingCell(player.position, p);
     if (insideScene(scene, c)) {
-      const color = scene[c.y][c.x];
-      if (color !== null) {
+      const cell = scene[c.y][c.x];
+      if (cell instanceof Color) {
         const v = p.sub(player.position);
         const d = Vector2.fromAngle(player.direction);
         const stripHeight = ctx.canvas.height / v.dot(d);
-        ctx.fillStyle = color;
+        ctx.fillStyle = cell.brightness(1 / v.dot(d)).toStyle();
         ctx.fillRect(
           x * stripWidth,
-          ctx.canvas.height * 0.5 - stripHeight * 0.5,
+          (ctx.canvas.height - stripHeight) * 0.5,
           stripWidth,
           stripHeight
+        );
+      } else if (cell instanceof HTMLImageElement) {
+        const v = p.sub(player.position);
+        const d = Vector2.fromAngle(player.direction);
+        const stripHeight = ctx.canvas.height / v.dot(d);
+
+        let u = 0;
+        const t = p.sub(c);
+        if ((Math.abs(t.x) < EPS || Math.abs(t.x - 1) < EPS) && t.y > 0) {
+          u = t.y;
+        } else {
+          u = t.x;
+        }
+
+        ctx.drawImage(
+          cell,
+          Math.floor(u * cell.width),
+          0,
+          1,
+          cell.height,
+          x * stripWidth,
+          (ctx.canvas.height - stripHeight) * 0.5,
+          stripWidth,
+          stripHeight
+        );
+        ctx.fillStyle = new Color(0, 0, 0, 1 - 1 / v.dot(d)).toStyle();
+        ctx.fillRect(
+          x * stripWidth,
+          (ctx.canvas.height - stripHeight * 1.01) * 0.5,
+          stripWidth,
+          stripHeight * 1.01
         );
       }
     }
@@ -281,7 +361,16 @@ function renderGame(
   renderMinimap(ctx, player, minimapPosition, minimapSize, scene);
 }
 
-(() => {
+async function loadImageData(url: string): Promise<HTMLImageElement> {
+  const image = new Image();
+  image.src = url;
+  return new Promise((resolve, reject) => {
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+  });
+}
+
+(async () => {
   const game = document.getElementById("game") as HTMLCanvasElement | null;
   if (game === null) throw new Error("Can't find game canvas!");
   const factor = 80;
@@ -291,55 +380,96 @@ function renderGame(
   const ctx = game.getContext("2d");
   if (ctx === null) throw new Error("Not supported!");
 
+  const face = await loadImageData("assets/textures/wall.png").catch(() =>
+    Color.purple()
+  );
+
   let scene = [
-    [null, null, null, "red", null, null, null, null, null],
-    [null, null, null, "orange", null, null, null, null, null],
-    [null, "green", "red", "blue", null, null, null, null, null],
+    [null, null, null, face, null, null, null, null, null],
+    [null, null, null, face, null, null, null, null, null],
+    [null, face, face, face, null, null, null, null, null],
     [null, null, null, null, null, null, null, null, null],
-    [null, "red", "purple", null, null, null, null, null, null],
-    [null, null, "blue", null, null, null, null, null, null],
-    [null, null, null, "red", "yellow", null, null, null, null],
-    [null, null, null, null, "green", null, null, null, null],
+    [null, null, null, null, null, null, null, null, null],
+    [null, null, null, null, null, null, null, null, null],
+    [null, null, null, null, null, null, null, null, null],
+    [null, null, null, null, null, null, null, null, null],
   ];
   let player = new Player(
     sceneSize(scene).mul(new Vector2(0.65, 0.65)),
     Math.PI * 1.25
   );
 
+  let movingForward = false;
+  let movingBackward = false;
+  let turningLeft = false;
+  let turningRight = false;
+
   window.addEventListener("keydown", (e) => {
     if (!e.repeat) {
       switch (e.code) {
         case "KeyW":
-          {
-            player.position = player.position.add(
-              Vector2.fromAngle(player.direction).scale(PLAYER_STEP_LEN)
-            );
-            renderGame(ctx, player, scene);
-          }
+          movingForward = true;
           break;
         case "KeyS":
-          {
-            player.position = player.position.sub(
-              Vector2.fromAngle(player.direction).scale(PLAYER_STEP_LEN)
-            );
-            renderGame(ctx, player, scene);
-          }
-          break;
-        case "KeyD":
-          {
-            player.direction += Math.PI * 0.1;
-            renderGame(ctx, player, scene);
-          }
+          movingBackward = true;
           break;
         case "KeyA":
-          {
-            player.direction -= Math.PI * 0.1;
-            renderGame(ctx, player, scene);
-          }
+          turningLeft = true;
+          break;
+        case "KeyD":
+          turningRight = true;
+          break;
+      }
+    }
+  });
+  window.addEventListener("keyup", (e) => {
+    if (!e.repeat) {
+      switch (e.code) {
+        case "KeyW":
+          movingForward = false;
+          break;
+        case "KeyS":
+          movingBackward = false;
+          break;
+        case "KeyA":
+          turningLeft = false;
+          break;
+        case "KeyD":
+          turningRight = false;
           break;
       }
     }
   });
 
-  renderGame(ctx, player, scene);
+  let prevTimestamp = 0;
+  const frame = (timestamp: number) => {
+    const deltaTime = (timestamp - prevTimestamp) / 1000;
+    prevTimestamp = timestamp;
+    let velocity = Vector2.zero();
+    let angularVelocity = 0.0;
+    if (movingForward) {
+      velocity = velocity.add(
+        Vector2.fromAngle(player.direction).scale(PLAYER_SPEED)
+      );
+    }
+    if (movingBackward) {
+      velocity = velocity.sub(
+        Vector2.fromAngle(player.direction).scale(PLAYER_SPEED)
+      );
+    }
+    if (turningLeft) {
+      angularVelocity -= Math.PI;
+    }
+    if (turningRight) {
+      angularVelocity += Math.PI;
+    }
+    player.direction = player.direction + angularVelocity * deltaTime;
+    player.position = player.position.add(velocity.scale(deltaTime));
+    renderGame(ctx, player, scene);
+    window.requestAnimationFrame(frame);
+  };
+  window.requestAnimationFrame((timestamp) => {
+    prevTimestamp = timestamp;
+    window.requestAnimationFrame(frame);
+  });
 })();
