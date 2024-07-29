@@ -359,6 +359,15 @@ function loadImageData(url) {
             }
         }
     });
+    const isDev = window.location.hostname === "localhost";
+    if (isDev) {
+        const ws = new WebSocket("ws://localhost:8080");
+        ws.addEventListener("message", (event) => __awaiter(void 0, void 0, void 0, function* () {
+            if (event.data === "reload") {
+                window.location.reload();
+            }
+        }));
+    }
     let prevTimestamp = 0;
     const frame = (timestamp) => {
         const deltaTime = (timestamp - prevTimestamp) / 1000;

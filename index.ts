@@ -441,6 +441,17 @@ async function loadImageData(url: string): Promise<HTMLImageElement> {
     }
   });
 
+  const isDev = window.location.hostname === "localhost";
+  if (isDev) {
+    const ws = new WebSocket("ws://localhost:8080");
+
+    ws.addEventListener("message", async (event) => {
+      if (event.data === "reload") {
+        window.location.reload();
+      }
+    });
+  }
+
   let prevTimestamp = 0;
   const frame = (timestamp: number) => {
     const deltaTime = (timestamp - prevTimestamp) / 1000;
