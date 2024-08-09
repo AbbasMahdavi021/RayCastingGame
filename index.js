@@ -12,12 +12,68 @@ const EPS = 1e-6;
 const NEAR_CLIPPING_PLANE = 0.1;
 const FAR_CLIPPING_PLANE = 20.0;
 const FOV = Math.PI * 0.5;
-const SCREEN_FACTOR = 10;
+const SCREEN_FACTOR = 70;
 const SCREEN_WIDTH = Math.floor(16 * SCREEN_FACTOR);
 const SCREEN_HEIGHT = Math.floor(9 * SCREEN_FACTOR);
-const PLAYER_STEP_LEN = 0.5;
 const PLAYER_SPEED = 2;
 const PLAYER_SIZE = 0.5;
+class Scene {
+    constructor(walls) {
+        this.height = walls.length;
+        this.width = Number.MIN_VALUE;
+        for (let row of walls) {
+            this.width = Math.max(this.width, row.length);
+        }
+        this.walls = [];
+        for (let row of walls) {
+            this.walls = this.walls.concat(row);
+            for (let i = 0; i < this.width - row.length; ++i) {
+                this.walls.push(null);
+            }
+        }
+    }
+    // Returns the size of the scene as a Vector2 object
+    size() {
+        return new Vector2(this.width, this.height);
+    }
+    // Checks if the given position is within the scene boundaries
+    contains(p) {
+        return p.x >= 0 && p.x < this.width && p.y >= 0 && p.y < this.height;
+    }
+    // Retrieves the wall tile at a given position, or undefined if out of bounds
+    getWall(p) {
+        if (!this.contains(p))
+            return undefined;
+        return this.walls[p.y * this.width + p.x];
+    }
+    // Checks if there is a wall at a given position
+    isWall(p) {
+        const tile = this.getWall(p);
+        return tile !== null && tile !== undefined;
+    }
+}
+class Player {
+    constructor(position, direction) {
+        this.position = position;
+        this.direction = direction;
+    }
+    // Calculates the field of view (FOV) range as two points
+    fovRange() {
+        // Calculate the distance from the center of the FOV to the edge
+        const distanceToEdge = Math.tan(FOV * 0.5) * NEAR_CLIPPING_PLANE;
+        // Calculate the point directly in front of the player at the near clipping plane
+        const frontPoint = this.position.add(Vector2.angle(this.direction).scale(NEAR_CLIPPING_PLANE));
+        // Calculate the left and right edges of the FOV
+        const directionToEdge = frontPoint
+            .sub(this.position)
+            .rot90()
+            .norm()
+            .scale(distanceToEdge);
+        const leftEdge = frontPoint.sub(directionToEdge);
+        const rightEdge = frontPoint.add(directionToEdge);
+        return [leftEdge, rightEdge];
+    }
+}
 class Vector2 {
     constructor(x, y) {
         this.x = x;
@@ -65,7 +121,7 @@ class Vector2 {
     sqrDistanceTo(that) {
         return that.sub(this).sqrLength();
     }
-    lerp(that, t) {
+    interpolate(that, t) {
         return that.sub(this).scale(t).add(this);
     }
     dot(that) {
@@ -76,55 +132,6 @@ class Vector2 {
     }
     array() {
         return [this.x, this.y];
-    }
-}
-class RGBA {
-    constructor(r, g, b, a) {
-        this.r = r;
-        this.g = g;
-        this.b = b;
-        this.a = a;
-    }
-    static red() {
-        return new RGBA(1, 0, 0, 1);
-    }
-    static green() {
-        return new RGBA(0, 1, 0, 1);
-    }
-    static blue() {
-        return new RGBA(0, 0, 1, 1);
-    }
-    static yellow() {
-        return new RGBA(1, 1, 0, 1);
-    }
-    static purple() {
-        return new RGBA(1, 0, 1, 1);
-    }
-    static cyan() {
-        return new RGBA(0, 1, 1, 1);
-    }
-    brightness(factor) {
-        return new RGBA(factor * this.r, factor * this.g, factor * this.b, this.a);
-    }
-    toStyle() {
-        return (`rgba(` +
-            `${Math.floor(this.r * 255)}, ` +
-            `${Math.floor(this.g * 255)}, ` +
-            `${Math.floor(this.b * 255)}, ` +
-            `${this.a})`);
-    }
-}
-class Player {
-    constructor(position, direction) {
-        this.position = position;
-        this.direction = direction;
-    }
-    fovRange() {
-        const l = Math.tan(FOV * 0.5) * NEAR_CLIPPING_PLANE;
-        const p = this.position.add(Vector2.angle(this.direction).scale(NEAR_CLIPPING_PLANE));
-        const p1 = p.sub(p.sub(this.position).rot90().norm().scale(l));
-        const p2 = p.add(p.sub(this.position).rot90().norm().scale(l));
-        return [p1, p2];
     }
 }
 function drawLine(ctx, p1, p2) {
@@ -141,57 +148,99 @@ function drawCircle(ctx, center, radius) {
 function canvasSize(ctx) {
     return new Vector2(ctx.canvas.width, ctx.canvas.height);
 }
-function snap(x, dx) {
+/**
+ * Adjusts a number to the nearest boundary based on the direction of adjustment.
+ *
+ * @param x - The value to be adjusted.
+ * @param dx - The direction of adjustment. Positive means rounding up, negative means rounding down.
+ *
+ * @returns The adjusted value, rounded to the nearest boundary according to the direction.
+ */
+function alignToGrid(x, dx) {
     if (dx > 0)
         return Math.ceil(x + Math.sign(dx) * EPS);
     if (dx < 0)
         return Math.floor(x + Math.sign(dx) * EPS);
     return x;
 }
-function hittingCell(p1, p2) {
-    const d = p2.sub(p1);
-    return new Vector2(Math.floor(p2.x + Math.sign(d.x) * EPS), Math.floor(p2.y + Math.sign(d.y) * EPS));
+/**
+ * Determines the grid cell at the endpoint of a ray, adjusting to the nearest grid line.
+ *
+ * @param start - The starting point of the ray.
+ * @param end - The end point of the ray.
+ *
+ * @returns The grid cell coordinates at the ray's endpoint, aligned to the nearest grid line.
+ */
+function findCellAtRayEnd(start, end) {
+    const delta = end.sub(start);
+    return new Vector2(Math.floor(end.x + Math.sign(delta.x) * EPS), Math.floor(end.y + Math.sign(delta.y) * EPS));
 }
-function rayStep(p1, p2) {
-    /* slope equation
-      p1 = (x1, y1)
-      p2 = (x2, y2)
-      
-      y1 = m*x1 + c
-      y2 = m*x2 + c
-  
-      dy = y2 - y1
-      dx = x2 - x1
-      m = dy / dx
-      c = y1 - k*x1
-  
-    */
-    let p3 = p2;
-    const d = p2.sub(p1);
-    if (d.x != 0) {
-        const m = d.y / d.x;
-        const c = p1.y - m * p1.x;
-        const x3 = snap(p2.x, d.x);
-        const y3 = m * x3 + c;
-        {
-            const y3 = x3 * m + c;
-            p3 = new Vector2(x3, y3);
-        }
-        if (m !== 0) {
-            const y3 = snap(p2.y, d.y);
-            const x3 = (y3 - c) / m;
-            const p3t = new Vector2(x3, y3);
-            if (p2.sqrDistanceTo(p3t) < p2.sqrDistanceTo(p3)) {
-                p3 = p3t;
+/**
+ * Computes the intersection point of a ray with the grid lines.
+ * The ray is defined by two points, `p1` and `p2`. This function snaps the end of the ray to the nearest grid line, considering both x and y coordinates.
+        
+        y = m*x + b
+        x = (y - b) / m
+
+        p1 = (x1, y1)
+        P2 = (X2, Y2)
+
+        y1= m*x1 + b
+        y2= m*x2 + b
+
+        //get b from first equation
+        b = y1 - m*x1
+        
+        // plugin b into second equation
+        y2 = m*x2 + y1 - m*x1
+        //simplify
+        y2 = m*x2 - m*x1 + y1
+        y2 = m(x2 - x1) + y1
+        y2 - y1 = m(x2 - x1)
+        (y2 - y1) / (x2 - x1) = m
+        m = (y2 - y1) / (x2 - x1)
+
+        //delta
+        dx = (x2 - x1)
+        dy = (y2 - y1)
+        
+        //slope
+        m = dy / dx
+        //y-intercept
+        b = y1 - m*x1
+
+ * @param p1 - The starting point of the ray.
+ * @param p2 - The end point of the ray.
+ *
+ * @returns The snapped intersection point of the ray with the nearest grid line.
+ */
+function findRayIntersection(p1, p2) {
+    let intersection = p2;
+    const delta = p2.sub(p1);
+    if (delta.x !== 0) {
+        const slope = delta.y / delta.x; // Slope of the line
+        const intercept = p1.y - slope * p1.x; // Y-intercept of the line
+        // Snap to the nearest vertical grid line
+        const xGridLine = alignToGrid(p2.x, delta.x);
+        const yGridLine = slope * xGridLine + intercept;
+        intersection = new Vector2(xGridLine, yGridLine);
+        // Snap to the nearest horizontal grid line
+        if (slope !== 0) {
+            const yGridLineSnap = alignToGrid(p2.y, delta.y);
+            const xGridLineSnap = (yGridLineSnap - intercept) / slope;
+            const potentialIntersection = new Vector2(xGridLineSnap, yGridLineSnap);
+            // Choose the intersection point that is closest to p2
+            if (p2.sqrDistanceTo(potentialIntersection) < p2.sqrDistanceTo(intersection)) {
+                intersection = potentialIntersection;
             }
         }
     }
     else {
-        const y3 = snap(p2.y, d.y);
-        const x3 = p2.x;
-        p3 = new Vector2(x3, y3);
+        // Vertical line case: snap to the nearest horizontal grid line
+        const yGridLine = alignToGrid(p2.y, delta.y);
+        intersection = new Vector2(p2.x, yGridLine);
     }
-    return p3;
+    return intersection;
 }
 function renderMinimap(ctx, player, position, size, scene) {
     ctx.save();
@@ -204,8 +253,8 @@ function renderMinimap(ctx, player, position, size, scene) {
     for (let y = 0; y < gridSize.y; ++y) {
         for (let x = 0; x < gridSize.x; ++x) {
             const cell = scene.getWall(new Vector2(x, y));
-            if (cell instanceof RGBA) {
-                ctx.fillStyle = cell.toStyle();
+            if (cell instanceof String) {
+                ctx.fillStyle = "purple";
                 ctx.fillRect(x, y, 1, 1);
             }
             else if (cell instanceof HTMLImageElement) {
@@ -221,111 +270,113 @@ function renderMinimap(ctx, player, position, size, scene) {
         drawLine(ctx, new Vector2(0, y), new Vector2(gridSize.x, y));
     }
     ctx.fillStyle = "lime";
-    // fillCircle(ctx, player.position, 0.2);
     ctx.fillRect(player.position.x - PLAYER_SIZE * 0.5, player.position.y - PLAYER_SIZE * 0.5, PLAYER_SIZE, PLAYER_SIZE);
-    const [p1, p2] = player.fovRange();
-    ctx.strokeStyle = "lime";
-    drawLine(ctx, p1, p2);
-    drawLine(ctx, player.position, p1);
-    drawLine(ctx, player.position, p2);
     ctx.restore();
 }
-class Scene {
-    constructor(walls) {
-        this.floor1 = new RGBA(0.094, 0.094, 0.094, 1.0);
-        this.floor2 = new RGBA(0.188, 0.188, 0.188, 1.0);
-        this.ceiling1 = new RGBA(0.53, 0.81, 0.92, 1.0);
-        this.ceiling2 = new RGBA(0.26, 0.48, 0.73, 1.0);
-        this.height = walls.length;
-        this.width = Number.MIN_VALUE;
-        for (let row of walls) {
-            this.width = Math.max(this.width, row.length);
-        }
-        this.walls = [];
-        for (let row of walls) {
-            this.walls = this.walls.concat(row);
-            for (let i = 0; i < this.width - row.length; ++i) {
-                this.walls.push(null);
-            }
-        }
-    }
-    size() {
-        return new Vector2(this.width, this.height);
-    }
-    contains(p) {
-        return 0 <= p.x && p.x < this.width && 0 <= p.y && p.y < this.height;
-    }
-    getWall(p) {
-        if (!this.contains(p))
-            return undefined;
-        const fp = p.map(Math.floor);
-        return this.walls[fp.y * this.width + fp.x];
-    }
-    getFloor(p) {
-        const t = p.map(Math.floor);
-        if ((t.x + t.y) % 2 == 0) {
-            return this.floor1;
-        }
-        else {
-            return this.floor2;
-        }
-    }
-    getCeiling(p) {
-        const t = p.map(Math.floor);
-        if ((t.x + t.y) % 2 == 0) {
-            return this.ceiling1;
-        }
-        else {
-            return this.ceiling2;
-        }
-    }
-    isWall(p) {
-        const c = this.getWall(p);
-        return c !== null && c !== undefined;
-    }
-}
+/**
+ * Traces a ray through a scene to find where it intersects with a wall or exits the scene.
+ *
+ * @param scene - The scene object containing information about walls and the grid.
+ * @param p1 - The starting point of the ray.
+ * @param p2 - The end point of the ray.
+ *
+ * @returns The final intersection point of the ray, which could be where it hits a wall or the far clipping plane.
+ */
 function castRay(scene, p1, p2) {
     let start = p1;
+    // Loop until the ray reaches the far clipping plane or intersects with a wall
     while (start.sqrDistanceTo(p1) < FAR_CLIPPING_PLANE * FAR_CLIPPING_PLANE) {
-        const c = hittingCell(p1, p2);
-        if (scene.isWall(c))
+        // Find the grid cell at the endpoint of the ray
+        const cell = findCellAtRayEnd(p1, p2);
+        // Check if the cell contains a wall
+        if (scene.isWall(cell))
             break;
-        const p3 = rayStep(p1, p2);
+        // Calculate the next intersection point of the ray with the grid
+        const intersection = findRayIntersection(p1, p2);
+        // Update the ray's start and end points
         p1 = p2;
-        p2 = p3;
+        p2 = intersection;
     }
+    // Return the final point where the ray intersects with a wall or exits the scene
     return p2;
 }
 function renderScene(ctx, player, scene) {
     ctx.save();
     ctx.scale(ctx.canvas.width / SCREEN_WIDTH, ctx.canvas.height / SCREEN_HEIGHT);
-    const [r1, r2] = player.fovRange();
-    for (let x = 0; x < SCREEN_WIDTH; ++x) {
-        const p = castRay(scene, player.position, r1.lerp(r2, x / SCREEN_WIDTH));
-        const c = hittingCell(player.position, p);
-        const cell = scene.getWall(c);
-        if (cell instanceof RGBA) {
-            const v = p.sub(player.position);
-            const d = Vector2.angle(player.direction);
-            const stripHeight = SCREEN_HEIGHT / v.dot(d);
-            ctx.fillStyle = cell.brightness(1 / v.dot(d)).toStyle();
-            ctx.fillRect(Math.floor(x), Math.floor((SCREEN_HEIGHT - stripHeight) * 0.5), Math.ceil(1), Math.ceil(stripHeight));
+    const [leftRay, rightRay] = player.fovRange();
+    for (let screenX = 0; screenX < SCREEN_WIDTH; ++screenX) {
+        const ray = castRay(scene, player.position, leftRay.interpolate(rightRay, screenX / SCREEN_WIDTH));
+        const hitCellCoordinates = findCellAtRayEnd(player.position, ray);
+        const wall = scene.getWall(hitCellCoordinates);
+        if (typeof wall === "string") {
+            // Render a wall with a solid color if the wall is represented as a string
+            // The 'wall' being a string implies it is a placeholder or color name.
+            // Calculate the vector from the player's position to the ray's intersection point
+            const rayVector = ray.sub(player.position);
+            // Get the direction the player is facing, converted into a vector
+            const direction = Vector2.angle(player.direction);
+            // Compute the height of the wall strip on the screen
+            // This is done using the distance between the ray's intersection point and the player.
+            // The height is inversely proportional to the distance from the player to the wall.
+            const wallHeight = SCREEN_HEIGHT / rayVector.dot(direction);
+            // Set the color to "purple" for rendering the wall
+            ctx.fillStyle = "purple";
+            // Draw the wall as a vertical strip on the canvas
+            // The width of the strip is 1 pixel, and its height is determined by 'wallHeight'.
+            ctx.fillRect(Math.floor(screenX), // X position of the strip on the screen
+            Math.floor((SCREEN_HEIGHT - wallHeight) * 0.5), // Y position, centered vertically
+            Math.ceil(1), // Width of the strip (1 pixel)
+            Math.ceil(wallHeight) // Height of the strip
+            );
         }
-        else if (cell instanceof HTMLImageElement) {
-            const v = p.sub(player.position);
-            const d = Vector2.angle(player.direction);
-            const stripHeight = SCREEN_HEIGHT / v.dot(d);
-            let u = 0;
-            const t = p.sub(c);
-            if ((Math.abs(t.x) < EPS || Math.abs(t.x - 1) < EPS) && t.y > 0) {
-                u = t.y;
+        else if (wall instanceof HTMLImageElement) {
+            // Render a wall with a texture if the wall is an HTML image element
+            // Calculate the vector from the player's position to the ray's intersection point
+            const rayVector = ray.sub(player.position);
+            // Get the direction the player is facing, converted into a vector
+            const direction = Vector2.angle(player.direction);
+            // Compute the height of the wall strip on the screen
+            // This is done using the distance between the ray's intersection point and the player.
+            // The height is inversely proportional to the distance from the player to the wall.
+            const wallHeight = SCREEN_HEIGHT / rayVector.dot(direction);
+            // Initialize the texture coordinate to 0
+            let textureCoordinate = 0;
+            // Determine the relative position of the hit point within the cell
+            const relativeHitPosition = ray.sub(hitCellCoordinates);
+            // Calculate the texture coordinate based on the position where the ray intersects the wall
+            if ((Math.abs(relativeHitPosition.x) < EPS || // Check if the x-coordinate is very close to the grid lines
+                Math.abs(relativeHitPosition.x - 1) < EPS) &&
+                relativeHitPosition.y > 0 // Ensure the y-coordinate is positive
+            ) {
+                // If the intersection is close to the vertical edges, use the y-coordinate for texture mapping
+                textureCoordinate = relativeHitPosition.y;
             }
             else {
-                u = t.x;
+                // Otherwise, use the x-coordinate for texture mapping
+                textureCoordinate = relativeHitPosition.x;
             }
-            ctx.drawImage(cell, Math.floor(u * cell.width), 0, 1, cell.height, Math.floor(x), Math.floor((SCREEN_HEIGHT - stripHeight) * 0.5), Math.ceil(1), Math.ceil(stripHeight));
-            ctx.fillStyle = new RGBA(0, 0, 0, 1 - 1 / v.dot(d)).toStyle();
-            ctx.fillRect(Math.floor(x), Math.floor((SCREEN_HEIGHT - stripHeight) * 0.5), Math.ceil(1), Math.ceil(stripHeight));
+            // Draw the wall texture onto the canvas
+            ctx.drawImage(wall, // The image element to use as the texture
+            Math.floor(textureCoordinate * wall.width), // X position on the texture
+            0, // Y position on the texture
+            1, // Width of the texture (1 pixel for the strip)
+            wall.height, // Height of the texture
+            Math.floor(screenX), // X position of the strip on the screen
+            Math.floor((SCREEN_HEIGHT - wallHeight) * 0.5), // Y position, centered vertically
+            Math.ceil(1), // Width of the strip (1 pixel)
+            Math.ceil(wallHeight) // Height of the strip
+            );
+            // Calculate the alpha value for shading
+            // This adds a darkening effect based on the distance from the player
+            const alpha = 1 - 1 / rayVector.dot(direction);
+            // Set the fill style to a semi-transparent black color for shading
+            ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
+            // Draw a shaded strip over the texture to simulate depth and lighting
+            ctx.fillRect(Math.floor(screenX), // X position of the strip on the screen
+            Math.floor((SCREEN_HEIGHT - wallHeight) * 0.5), // Y position, centered vertically
+            Math.ceil(1), // Width of the strip (1 pixel)
+            Math.ceil(wallHeight) // Height of the strip
+            );
         }
     }
     ctx.restore();
@@ -339,65 +390,11 @@ function renderGame(ctx, player, scene) {
         ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
         ctx.fillStyle = "hsl(220, 20%, 30%)";
         ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height / 2);
-        renderFloor(ctx, player, scene);
-        renderCeiling(ctx, player, scene);
+        // renderFloor(ctx, player, scene);
+        // renderCeiling(ctx, player, scene);
         renderScene(ctx, player, scene);
         renderMinimap(ctx, player, minimapPosition, new Vector2(minimapSize, minimapSize), scene);
     });
-}
-function renderCeiling(ctx, player, scene) {
-    ctx.save();
-    ctx.scale(ctx.canvas.width / SCREEN_WIDTH, ctx.canvas.height / SCREEN_HEIGHT);
-    const pz = SCREEN_HEIGHT / 2;
-    const [p1, p2] = player.fovRange();
-    const bp = p1.sub(player.position).length();
-    for (let y = SCREEN_HEIGHT / 2; y < SCREEN_HEIGHT; ++y) {
-        const sz = SCREEN_HEIGHT - y - 1;
-        const ap = pz - sz;
-        const b = ((bp / ap) * pz) / NEAR_CLIPPING_PLANE;
-        const t1 = player.position.add(p1.sub(player.position).norm().scale(b));
-        const t2 = player.position.add(p2.sub(player.position).norm().scale(b));
-        for (let x = 0; x < SCREEN_WIDTH; ++x) {
-            const t = t1.lerp(t2, x / SCREEN_WIDTH);
-            const tile = scene.getCeiling(t);
-            if (tile instanceof RGBA) {
-                ctx.fillStyle = tile.toStyle();
-                ctx.fillRect(x, sz, 1, 1);
-            }
-            else if (tile instanceof HTMLImageElement) {
-                const c = t.map((x) => x - Math.floor(x));
-                ctx.drawImage(tile, Math.floor(c.x * tile.width), Math.floor(c.y * tile.height), 1, 1, x, y, 1, 1);
-            }
-        }
-    }
-    ctx.restore();
-}
-function renderFloor(ctx, player, scene) {
-    ctx.save();
-    ctx.scale(ctx.canvas.width / SCREEN_WIDTH, ctx.canvas.height / SCREEN_HEIGHT);
-    const pz = SCREEN_HEIGHT / 2;
-    const [p1, p2] = player.fovRange();
-    const bp = p1.sub(player.position).length();
-    for (let y = SCREEN_HEIGHT / 2; y < SCREEN_HEIGHT; ++y) {
-        const sz = SCREEN_HEIGHT - y - 1;
-        const ap = pz - sz;
-        const b = ((bp / ap) * pz) / NEAR_CLIPPING_PLANE;
-        const t1 = player.position.add(p1.sub(player.position).norm().scale(b));
-        const t2 = player.position.add(p2.sub(player.position).norm().scale(b));
-        for (let x = 0; x < SCREEN_WIDTH; ++x) {
-            const t = t1.lerp(t2, x / SCREEN_WIDTH);
-            const tile = scene.getFloor(t);
-            if (tile instanceof RGBA) {
-                ctx.fillStyle = tile.toStyle();
-                ctx.fillRect(x, y, 1, 1);
-            }
-            else if (tile instanceof HTMLImageElement) {
-                const c = t.map((x) => x - Math.floor(x));
-                ctx.drawImage(tile, Math.floor(c.x * tile.width), Math.floor(c.y * tile.height), 1, 1, x, y, 1, 1);
-            }
-        }
-    }
-    ctx.restore();
 }
 function loadImageData(url) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -410,45 +407,65 @@ function loadImageData(url) {
     });
 }
 function canPlayerGoThere(scene, newPosition) {
-    // TODO: try circle boundary instead of a box
+    // Calculate the coordinates of the top-left corner of the player's bounding box
+    // Subtract half the player size to get the left edge and floor the result for grid alignment
     const leftTopCorner = newPosition
         .sub(Vector2.scalar(PLAYER_SIZE * 0.5))
         .map(Math.floor);
+    // Calculate the coordinates of the bottom-right corner of the player's bounding box
+    // Add half the player size to get the right edge and floor the result for grid alignment
     const rightBottomCorner = newPosition
         .add(Vector2.scalar(PLAYER_SIZE * 0.5))
         .map(Math.floor);
+    // Loop through each grid cell within the bounding box of the player
     for (let x = leftTopCorner.x; x <= rightBottomCorner.x; ++x) {
         for (let y = leftTopCorner.y; y <= rightBottomCorner.y; ++y) {
+            // Check if the current grid cell contains a wall
             if (scene.isWall(new Vector2(x, y))) {
+                // If a wall is found, the player cannot move to this position
                 return false;
             }
         }
     }
+    // If no walls are found within the bounding box, the player can move to this position
     return true;
 }
 (() => __awaiter(void 0, void 0, void 0, function* () {
+    //Hot Reload
+    const isDev = window.location.hostname === "localhost";
+    console.log(isDev);
+    if (isDev) {
+        console.log("dasdasdaasdasdsasdasdasasdasdasdasdasdasdasasdev");
+        const ws = new WebSocket("ws://localhost:8080");
+        ws.addEventListener("message", (event) => {
+            if (event.data === "reload") {
+                window.location.reload();
+            }
+        });
+    }
     const game = document.getElementById("game");
     if (game === null)
         throw new Error("No canvas with id `game` is found");
-    const factor = 80;
+    const factor = 70;
     game.width = 16 * factor;
     game.height = 9 * factor;
     const ctx = game.getContext("2d");
     if (ctx === null)
         throw new Error("2D context is not supported");
     ctx.imageSmoothingEnabled = false;
-    const wall = yield loadImageData("assets/textures/wall.png").catch(() => RGBA.purple());
+    const wall = yield loadImageData("assets/textures/wall.png").catch(() => "brown");
+    const grass = yield loadImageData("assets/textures/grass.jpg").catch(() => "green");
     const scene = new Scene([
         [null, wall, wall, wall, wall, wall, null, null, null],
         [null, null, null, wall, null, wall, null, null, null],
         [null, wall, wall, wall, null, wall, wall, wall, null],
         [null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null],
-        [null, wall, wall, wall, null, null, null, null, null],
+        [null, grass, grass, grass, null, null, null, null, null],
         [null, null, null, wall, wall, wall, null, null, null],
-        [null, null, null, null, null, null, null, null, null],
+        [grass, null, null, null, null, null, null, null, null],
     ]);
-    const player = new Player(scene.size().mul(new Vector2(0.63, 0.63)), Math.PI * 1.25);
+    const player = new Player(scene.size().mul(new Vector2(0.5, 0.5)), Math.PI * 1.25);
     let movingForward = false;
     let movingBackward = false;
     let turningLeft = false;
@@ -491,34 +508,41 @@ function canPlayerGoThere(scene, newPosition) {
     });
     let prevTimestamp = 0;
     const frame = (timestamp) => {
-        const deltaTime = (timestamp - prevTimestamp) / 1000;
+        const elapsedSeconds = (timestamp - prevTimestamp) / 1000;
         prevTimestamp = timestamp;
-        let velocity = Vector2.zero();
-        let angularVelocity = 0.0;
+        let movement = Vector2.zero();
+        let rotationSpeed = 0.0;
+        // Update movement based on input
+        const movementStep = Vector2.angle(player.direction).scale(PLAYER_SPEED);
         if (movingForward) {
-            velocity = velocity.add(Vector2.angle(player.direction).scale(PLAYER_SPEED));
+            movement = movement.add(movementStep);
         }
         if (movingBackward) {
-            velocity = velocity.sub(Vector2.angle(player.direction).scale(PLAYER_SPEED));
+            movement = movement.sub(movementStep);
         }
+        // Update rotation based on input
         if (turningLeft) {
-            angularVelocity -= Math.PI;
+            rotationSpeed -= Math.PI;
         }
         if (turningRight) {
-            angularVelocity += Math.PI;
+            rotationSpeed += Math.PI;
         }
-        player.direction = player.direction + angularVelocity * deltaTime;
-        const nx = player.position.x + velocity.x * deltaTime;
-        if (canPlayerGoThere(scene, new Vector2(nx, player.position.y))) {
-            player.position.x = nx;
+        // Update player's direction and position
+        player.direction += rotationSpeed * elapsedSeconds;
+        const newX = player.position.x + movement.x * elapsedSeconds;
+        if (canPlayerGoThere(scene, new Vector2(newX, player.position.y))) {
+            player.position.x = newX;
         }
-        const ny = player.position.y + velocity.y * deltaTime;
-        if (canPlayerGoThere(scene, new Vector2(player.position.x, ny))) {
-            player.position.y = ny;
+        const newY = player.position.y + movement.y * elapsedSeconds;
+        if (canPlayerGoThere(scene, new Vector2(player.position.x, newY))) {
+            player.position.y = newY;
         }
+        // Render the game
         renderGame(ctx, player, scene);
+        // Request the next frame
         window.requestAnimationFrame(frame);
     };
+    // Start the game loop
     window.requestAnimationFrame((timestamp) => {
         prevTimestamp = timestamp;
         window.requestAnimationFrame(frame);
