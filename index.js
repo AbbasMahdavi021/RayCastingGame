@@ -381,9 +381,9 @@ function renderScene(ctx, player, scene) {
     }
     ctx.restore();
 }
-function renderGame(ctx, player, scene) {
+function renderGame(ctx, player, scene, showMinimap) {
     return __awaiter(this, void 0, void 0, function* () {
-        const minimapSize = 300;
+        const minimapSize = Math.min(ctx.canvas.width, ctx.canvas.height) * 0.3;
         const minimapPosition = new Vector2((ctx.canvas.width - minimapSize) / 2, ctx.canvas.height - minimapSize - 10 // 10 pixels padding from the bottom
         );
         ctx.fillStyle = "#181818";
@@ -393,7 +393,9 @@ function renderGame(ctx, player, scene) {
         // renderFloor(ctx, player, scene);
         // renderCeiling(ctx, player, scene);
         renderScene(ctx, player, scene);
-        renderMinimap(ctx, player, minimapPosition, new Vector2(minimapSize, minimapSize), scene);
+        if (showMinimap) {
+            renderMinimap(ctx, player, minimapPosition, new Vector2(minimapSize, minimapSize), scene);
+        }
     });
 }
 function loadImageData(url) {
@@ -435,7 +437,6 @@ function canPlayerGoThere(scene, newPosition) {
     const isDev = window.location.hostname === "localhost";
     console.log(isDev);
     if (isDev) {
-        console.log("dasdasdaasdasdsasdasdasasdasdasdasdasdasdasasdev");
         const ws = new WebSocket("ws://localhost:8080");
         ws.addEventListener("message", (event) => {
             if (event.data === "reload") {
@@ -446,25 +447,100 @@ function canPlayerGoThere(scene, newPosition) {
     const game = document.getElementById("game");
     if (game === null)
         throw new Error("No canvas with id `game` is found");
-    const factor = 70;
-    game.width = 16 * factor;
-    game.height = 9 * factor;
+    function resizeGameCanvas(game) {
+        const aspectRatio = 16 / 9; // Aspect ratio for the game screen
+        let width = window.innerWidth;
+        let height = window.innerHeight;
+        // Maintain the 16:9 aspect ratio
+        if (width / height > aspectRatio) {
+            width = height * aspectRatio; // Limit width
+        }
+        else {
+            height = width / aspectRatio; // Limit height
+        }
+        game.width = width;
+        game.height = height;
+    }
+    // Resize canvas initially and on window resize, passing the `game` canvas
+    resizeGameCanvas(game);
+    window.addEventListener("resize", () => resizeGameCanvas(game));
     const ctx = game.getContext("2d");
     if (ctx === null)
         throw new Error("2D context is not supported");
     ctx.imageSmoothingEnabled = false;
-    const wall = yield loadImageData("assets/textures/wall.png").catch(() => "brown");
+    const wall1 = yield loadImageData("assets/textures/wall1.png").catch(() => "brown");
+    const wall2 = yield loadImageData("assets/textures/wall2.png").catch(() => "brown");
+    const wall3 = yield loadImageData("assets/textures/wall3.png").catch(() => "brown");
+    const wall4 = yield loadImageData("assets/textures/wall4.png").catch(() => "brown");
     const grass = yield loadImageData("assets/textures/grass.jpg").catch(() => "green");
     const scene = new Scene([
-        [null, wall, wall, wall, wall, wall, null, null, null],
-        [null, null, null, wall, null, wall, null, null, null],
-        [null, wall, wall, wall, null, wall, wall, wall, null],
-        [null, null, null, null, null, null, null, null, null],
-        [null, null, null, null, null, null, null, null, null],
-        [null, grass, grass, grass, null, null, null, null, null],
-        [null, null, null, wall, wall, wall, null, null, null],
-        [grass, null, null, null, null, null, null, null, null],
+        [
+            wall1, wall1, wall1, wall2, wall1, wall1, wall3, wall1,
+            wall3, wall1, wall1, wall1, wall4, wall1, wall1, wall1,
+        ],
+        [
+            wall1, null, null, null, null, wall1, null, null,
+            null, null, null, null, null, null, null, wall1,
+        ],
+        [
+            wall1, null, wall1, wall1, null, wall1, null, wall1,
+            wall3, wall1, null, wall1, wall1, null, null, wall1,
+        ],
+        [
+            wall1, null, null, wall3, null, null, null, wall1,
+            null, null, null, null, wall4, null, null, wall3,
+        ],
+        [
+            wall1, wall1, null, wall1, null, wall1, null, wall1,
+            wall4, wall1, null, wall1, wall1, null, wall1, wall1,
+        ],
+        [
+            wall1, null, null, null, null, wall1, null, null,
+            null, null, null, null, null, null, null, wall2,
+        ],
+        [
+            wall2, null, wall1, wall4, wall1, wall1, null, wall1,
+            wall3, wall2, wall1, null, wall1, wall1, null, wall1,
+        ],
+        [
+            wall2, null, wall3, null, null, null, null, null,
+            null, null, wall1, null, null, null, null, wall1,
+        ],
+        [
+            wall1, null, wall1, null, wall1, wall3, wall1, null,
+            wall1, null, wall1, wall2, wall1, null, null, wall4,
+        ],
+        [
+            wall3, null, null, null, null, null, null, null,
+            wall1, null, null, null, null, null, null, wall1,
+        ],
+        [
+            wall3, wall3, wall1, wall1, null, wall1, wall1, wall1,
+            wall1, wall1, null, wall1, wall4, wall3, wall1, wall1,
+        ],
+        [
+            wall1, null, wall2, null, null, null, null, null,
+            null, null, null, null, null, null, null, wall1,
+        ],
+        [
+            wall2, null, wall1, null, wall1, wall3, wall1, wall2,
+            wall1, wall2, wall1, null, null, null, wall1, wall1,
+        ],
+        [
+            wall1, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, wall1,
+        ],
+        [
+            wall1, wall1, wall3, wall1, wall2, wall2, wall1, wall3,
+            wall1, wall1, wall1, wall1, wall1, wall1, wall1, wall1,
+        ],
     ]);
+    let showMinimap = true;
+    // Add event listener for the minimap checkbox
+    const toggleMinimapCheckbox = document.getElementById("toggleMinimap");
+    toggleMinimapCheckbox.addEventListener("change", (event) => {
+        showMinimap = event.target.checked;
+    });
     const player = new Player(scene.size().mul(new Vector2(0.5, 0.5)), Math.PI * 1.25);
     let movingForward = false;
     let movingBackward = false;
@@ -538,7 +614,7 @@ function canPlayerGoThere(scene, newPosition) {
             player.position.y = newY;
         }
         // Render the game
-        renderGame(ctx, player, scene);
+        renderGame(ctx, player, scene, showMinimap);
         // Request the next frame
         window.requestAnimationFrame(frame);
     };
