@@ -6,4 +6,4 @@ Guide by Tsoding Daily and Lode's Computer Graphics Tutorial : https://lodev.org
 
 #Build Index.js
 npm install
-npm run build
+npm run watch
