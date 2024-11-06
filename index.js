@@ -472,7 +472,7 @@ function canPlayerGoThere(scene, newPosition) {
     const wall2 = yield loadImageData("assets/textures/wall2.png").catch(() => "brown");
     const wall3 = yield loadImageData("assets/textures/wall3.png").catch(() => "brown");
     const wall4 = yield loadImageData("assets/textures/wall4.png").catch(() => "brown");
-    const grass = yield loadImageData("assets/textures/grass.jpg").catch(() => "green");
+    const door1 = yield loadImageData("assets/textures/door1.png").catch(() => "grey");
     const scene = new Scene([
         [
             wall1, wall1, wall1, wall2, wall1, wall1, wall3, wall1,
@@ -487,11 +487,11 @@ function canPlayerGoThere(scene, newPosition) {
             wall3, wall1, null, wall1, wall1, null, null, wall1,
         ],
         [
-            wall1, null, null, wall3, null, null, null, wall1,
+            wall1, null, null, wall3, null, null, null, door1,
             null, null, null, null, wall4, null, null, wall3,
         ],
         [
-            wall1, wall1, null, wall1, null, wall1, null, wall1,
+            wall1, door1, wall1, wall1, null, wall1, null, wall1,
             wall4, wall1, null, wall1, wall1, null, wall1, wall1,
         ],
         [
@@ -504,7 +504,7 @@ function canPlayerGoThere(scene, newPosition) {
         ],
         [
             wall2, null, wall3, null, null, null, null, null,
-            null, null, wall1, null, null, null, null, wall1,
+            null, null, wall1, null, null, null, null, door1,
         ],
         [
             wall1, null, wall1, null, wall1, wall3, wall1, null,
@@ -515,7 +515,7 @@ function canPlayerGoThere(scene, newPosition) {
             wall1, null, null, null, null, null, null, wall1,
         ],
         [
-            wall3, wall3, wall1, wall1, null, wall1, wall1, wall1,
+            wall3, door1, wall1, wall1, null, wall1, wall1, wall1,
             wall1, wall1, null, wall1, wall4, wall3, wall1, wall1,
         ],
         [
@@ -532,7 +532,7 @@ function canPlayerGoThere(scene, newPosition) {
         ],
         [
             wall1, wall1, wall3, wall1, wall2, wall2, wall1, wall3,
-            wall1, wall1, wall1, wall1, wall1, wall1, wall1, wall1,
+            door1, wall1, wall1, wall1, wall1, wall1, wall1, wall1,
         ],
     ]);
     let showMinimap = true;

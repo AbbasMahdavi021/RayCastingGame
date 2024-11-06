@@ -589,8 +589,8 @@ function canPlayerGoThere(scene: Scene, newPosition: Vector2): boolean {
     () => "brown"
   );
 
-  const grass = await loadImageData("assets/textures/grass.jpg").catch(
-    () => "green"
+  const door1 = await loadImageData("assets/textures/door1.png").catch(
+    () => "grey"
   );
 
   const scene = new Scene([
@@ -607,11 +607,11 @@ function canPlayerGoThere(scene: Scene, newPosition: Vector2): boolean {
       wall3, wall1, null, wall1, wall1, null, null, wall1,
     ],
     [
-      wall1, null, null, wall3, null, null, null, wall1,
+      wall1, null, null, wall3, null, null, null, door1,
       null, null, null, null, wall4, null, null, wall3,
     ],
     [
-      wall1, wall1, null, wall1, null, wall1, null, wall1,
+      wall1, door1, wall1, wall1, null, wall1, null, wall1,
       wall4, wall1, null, wall1, wall1, null, wall1, wall1,
     ],
     [
@@ -624,7 +624,7 @@ function canPlayerGoThere(scene: Scene, newPosition: Vector2): boolean {
     ],
     [
       wall2, null, wall3, null, null, null, null, null,
-      null, null, wall1, null, null, null, null, wall1,
+      null, null, wall1, null, null, null, null, door1,
     ],
     [
       wall1, null, wall1, null, wall1, wall3, wall1, null,
@@ -635,7 +635,7 @@ function canPlayerGoThere(scene: Scene, newPosition: Vector2): boolean {
       wall1, null, null, null, null, null, null, wall1,
     ],
     [
-      wall3, wall3, wall1, wall1, null, wall1, wall1, wall1,
+      wall3, door1, wall1, wall1, null, wall1, wall1, wall1,
       wall1, wall1, null, wall1, wall4, wall3, wall1, wall1,
     ],
     [
@@ -652,7 +652,7 @@ function canPlayerGoThere(scene: Scene, newPosition: Vector2): boolean {
     ],
     [
       wall1, wall1, wall3, wall1, wall2, wall2, wall1, wall3,
-      wall1, wall1, wall1, wall1, wall1, wall1, wall1, wall1,
+      door1, wall1, wall1, wall1, wall1, wall1, wall1, wall1,
     ],
   ]);
   
